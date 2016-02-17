@@ -19,8 +19,9 @@ class cmd_opt {
 		std::string ifile;
 		std::string ofile;
 		double threshold;
+        bool critical_only;
 
-        cmd_opt() : threshold(0) {}
+        cmd_opt() : threshold(0), critical_only(false) {}
 		std::string help(const char* app);
 		int parse(int argc, char **argv); 
 };
@@ -31,7 +32,8 @@ std::string cmd_opt::help(const char* app)
 	ss << "Usage:" << std::endl
 		<< app << " [options] input" << std::endl
 		<< "-o, --output\tfile\tOutput file" << std::endl
-		<< "-t, --threshold\tnumber\tSpecify the minimum percent the node has to have to be shown" << std::endl;
+		<< "-t, --threshold\tnumber\tSpecify the minimum percent the node has to have to be shown" << std::endl
+        << "-c, --critical\t\t\tOutput critical path only" << std::endl;
 
 	return ss.str();
 }
@@ -47,6 +49,9 @@ int cmd_opt::parse(int argc, char **argv)
 					mode = CMD_OUTPUT_ARG;
 				} else if (arg == "-t" || arg == "--threshold") {
 					mode = CMD_THRESHOLD_ARG;
+                }
+                else if (arg == "-c" || arg == "--critical") {
+                    critical_only = true;
 				} else {
                     if (!ifile.empty()) {
                         return -3;
@@ -100,7 +105,7 @@ struct Node {
 struct MemoryDump {
 	private:
 		bool parse(const char *buf, Node &node);
-		bool draw_tree(Node &node, std::ofstream &ofile, int level);
+		bool draw_tree(Node &node, std::ofstream &ofile, bool set_critical, int level);
         void clear_visited(Node &);
         void clear_visited();
         void set_critical(const std::vector<Node*> &nodes);
@@ -260,14 +265,16 @@ void MemoryDump::set_critical(const std::vector<Node*> &nodes)
     }
 }
 
-bool MemoryDump::draw_tree(Node &node, std::ofstream &ofile, int level = 0)
+bool MemoryDump::draw_tree(Node &node, std::ofstream &ofile, bool critical_only = false,  int level = 0)
 {
     if (node.visited) return true;
     node.visited = true;
+    if (critical_only && !node.critical) return true;
 	for(const auto c : node.children) {
-		if (c->subtree_size >= min_size) {
+		if (c->subtree_size >= min_size
+            && (!critical_only || c->critical)) {
 			ofile << node.label << " -> " << c->label << std::endl;
-			draw_tree(*c, ofile, level + 1);
+			draw_tree(*c, ofile, critical_only, level + 1);
 		}
 	}
     return true;
@@ -282,6 +289,7 @@ bool MemoryDump::write_output(const cmd_opt &opt)
 		for(const auto &pair : nodes) {
 			const auto &node = pair.second;
             if (node.subtree_size < min_size) continue;
+            if (opt.critical_only && !node.critical) continue;
             ofile << node.label << "[label=\"" << (node.name == "(null)" ? node.label : node.name)
                 << "\\n" << kind2str[node.node_type]
                 << "\\n" << static_cast<size_t>(node.subtree_size) << "(" << static_cast<size_t>(node.size) << ")"
@@ -289,13 +297,13 @@ bool MemoryDump::write_output(const cmd_opt &opt)
                 << "(" << (node.size * 100 / total_size) << "%"
                 << ")\", "
                 << "shape=box";
-            if (node.critical) {
+            if (node.critical && !opt.critical_only) {
                 ofile << ", style=filled, fillcolor=yellow";
             }
             ofile << "];\n";
 		}
 		for(const auto &node : top_nodes) {
-			draw_tree(*node, ofile);
+			draw_tree(*node, ofile, opt.critical_only);
 		}
 		ofile << std::string("}") << std::endl;
         clear_visited();
