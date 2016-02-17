@@ -4,6 +4,9 @@
 #include <vector>
 #include <sstream>
 #include <fstream>
+#include <iomanip>
+
+#include "kind.h"
 
 class cmd_opt {
 	private:
@@ -77,16 +80,21 @@ int cmd_opt::parse(int argc, char **argv)
 struct Node {
 	std::string label;
 	std::set<std::string> parent_labels;
-	int node_type;
+	enum Reb_Kind node_type;
 	size_t size;
 	double subtree_size;
 	std::string name;
 	std::vector<Node*> children;
     bool visited;
+    bool critical;
 
     Node(const std::string &label_ = "", const std::string &name_ = "") :
         label(label_), name(name_),
-        node_type(0), size(0), subtree_size(0), visited(false) {}
+        node_type(REB_TRASH),
+        size(0),
+        subtree_size(0),
+        visited(false),
+        critical(false) {}
 };
 
 struct MemoryDump {
@@ -94,6 +102,8 @@ struct MemoryDump {
 		bool parse(const char *buf, Node &node);
 		bool draw_tree(Node &node, std::ofstream &ofile, int level);
         void clear_visited(Node &);
+        void clear_visited();
+        void set_critical(const std::vector<Node*> &nodes);
 		double total_size;
 		double min_size;
 	public:
@@ -107,7 +117,6 @@ struct MemoryDump {
 		double update_subtree_size(Node&, int);
 		double update_subtree_size();
 		bool write_output(const cmd_opt &opt);
-        void clear_visited();
 };
 
 bool MemoryDump::parse(const char *buf, Node &node)
@@ -132,7 +141,7 @@ bool MemoryDump::parse(const char *buf, Node &node)
 
 	p = strchr(buf, comma);
 	if (p == nullptr) return false;
-    node.node_type = std::stoi(std::string(buf, p - buf));
+    node.node_type = static_cast<enum Reb_Kind>(std::stoi(std::string(buf, p - buf)));
 	buf = p + 1;
 
 	p = strchr(buf, comma);
@@ -211,6 +220,9 @@ double MemoryDump::update_subtree_size()
 		total_size += update_subtree_size(*node);
 	}
     clear_visited();
+
+    set_critical(top_nodes);
+    clear_visited();
 	return total_size;
 }
 
@@ -227,6 +239,24 @@ void MemoryDump::clear_visited()
 {
     for (const auto &node : top_nodes) {
         clear_visited(*node);
+    }
+}
+
+void MemoryDump::set_critical(const std::vector<Node*> &nodes)
+{
+    double m = -1;
+    for (auto node : nodes) {
+        if (node->subtree_size > m) {
+            m = node->subtree_size;
+        }
+    }
+    for (auto node : nodes) {
+        if (node->subtree_size >= 0.5 * m) {
+            if (node->visited) continue;
+            node->visited = true;
+            node->critical = true;
+            set_critical(node->children);
+        }
     }
 }
 
@@ -253,7 +283,16 @@ bool MemoryDump::write_output(const cmd_opt &opt)
 			const auto &node = pair.second;
             if (node.subtree_size < min_size) continue;
             ofile << node.label << "[label=\"" << (node.name == "(null)" ? node.label : node.name)
-                << "," << static_cast<size_t>(node.subtree_size) << "(" << static_cast<size_t>(node.size) << ")\"];\n";
+                << "\\n" << kind2str[node.node_type]
+                << "\\n" << static_cast<size_t>(node.subtree_size) << "(" << static_cast<size_t>(node.size) << ")"
+                << "\\n" << std::fixed << std::setprecision(2) << (node.subtree_size * 100 / total_size) << "%"
+                << "(" << (node.size * 100 / total_size) << "%"
+                << ")\", "
+                << "shape=box";
+            if (node.critical) {
+                ofile << ", style=filled, fillcolor=yellow";
+            }
+            ofile << "];\n";
 		}
 		for(const auto &node : top_nodes) {
 			draw_tree(*node, ofile);
