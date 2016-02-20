@@ -17,12 +17,15 @@ class cmd_opt {
             CMD_NODE_ARG
 		};
 	public:
+        struct NodePath {
+            std::vector<std::string> node;
+            std::string literal;  /* for error report */
+        };
 		std::string ifile;
 		std::string ofile;
 		double threshold;
         bool critical_only;
-        std::vector<std::string> node;
-        std::string node_literal; /* for error report */
+        std::vector<NodePath> nodes;
 
         cmd_opt() : threshold(0), critical_only(false) {}
 		std::string help(const char* app);
@@ -84,16 +87,18 @@ int cmd_opt::parse(int argc, char **argv)
             case CMD_NODE_ARG:
             {
                 const char *buf = argv[i];
-                node_literal = buf;
+                NodePath path;
+                path.literal = buf;
                 while (true) {
                     const char *p = strchr(buf, ';');
                     if (p == nullptr) break;
-                    node.push_back(std::string(buf, p - buf));
+                    path.node.push_back(std::string(buf, p - buf));
                     buf = p + 1;
                 }
                 if (*buf != '\0') {
-                    node.push_back(std::string(buf));
+                    path.node.push_back(std::string(buf));
                 }
+                nodes.push_back(path);
             }
                 mode = CMD_OPT;
                 break;
@@ -105,14 +110,37 @@ int cmd_opt::parse(int argc, char **argv)
     return 0;
 }
 
+struct ParentNode {
+    std::string label;
+    std::string edge;
+    ParentNode(std::string label_, std::string edge_) :
+        label(label_),
+        edge(edge_)
+    {}
+};
+
+class ParentNodeComp {
+    public:
+    bool operator () (const ParentNode &a, const ParentNode &b) const {
+        return a.label < b.label;
+    }
+};
+
+struct Node;
+
+struct ChildNode {
+    Node* node;
+    std::string edge;
+};
+
 struct Node {
 	std::string label;
-	std::set<std::string> parent_labels;
+	std::set<ParentNode, ParentNodeComp> parents;
 	enum Reb_Kind node_type;
 	size_t size;
 	double subtree_size;
 	std::string name;
-	std::vector<Node*> children;
+	std::vector<ChildNode> children;
     bool visited;
     bool critical;
 
@@ -136,7 +164,7 @@ struct MemoryDump {
 		bool draw_tree(Node &node, std::ofstream &ofile, bool set_critical, int level);
         void clear_visited(Node &);
         void clear_visited();
-        void set_critical(const std::vector<Node*> &nodes);
+        void set_critical(const std::vector<ChildNode> &nodes);
         Node *find_node(std::vector<std::string> path) const;
         void write_node(const Node &, std::ofstream&, const cmd_opt &);
         void declare_nodes(Node &node, std::ofstream &ofile, const cmd_opt &opt);
@@ -148,7 +176,7 @@ struct MemoryDump {
 			min_size(0)
 		{}
 		std::unordered_map<std::string, Node> nodes;
-		std::vector<Node*> top_nodes;
+		std::vector<ChildNode> top_nodes;
 		bool import(const std::string &path);
 		double update_subtree_size(Node&, int);
 		double update_subtree_size();
@@ -159,22 +187,23 @@ enum MemoryDump::Parse_Result MemoryDump::parse(const char *buf, Node &node)
 {
 	const char comma = ',';
     while (*buf == ' ' || *buf == '\t') buf++;
-    if (*buf == '#') return PARSE_COMMENT; //ignore any line beginning with '#'
+    if (*buf == '#' || *buf == '\0') return PARSE_COMMENT; //ignore any line beginning with '#'
 	const char *p = strchr(buf, comma);
 	if (p == nullptr) return PARSE_FAIL;
-	node.label = std::string("N") + std::string(buf + 2, p - buf - 2); /* skip '0x' */
+    auto skip = buf[1] == 'x' ? 2 : 0;
+	node.label = std::string("N") + std::string(buf + skip, p - buf - skip); /* skip '0x' */
 	buf = p + 1;
 
 	p = strchr(buf, comma);
 	if (p == nullptr) return PARSE_FAIL;
     auto plabel = std::string(buf, p - buf);
     if (plabel != "(nil)") {
-        plabel = std::string("N") + plabel.substr(2);
+        plabel = std::string("N") + plabel.substr(plabel[1] == 'x'? 2 : 0);
     }
     else {
         plabel = "NIL";
     }
-    node.parent_labels.insert(plabel);
+
 	buf = p + 1;
 
 	p = strchr(buf, comma);
@@ -187,7 +216,20 @@ enum MemoryDump::Parse_Result MemoryDump::parse(const char *buf, Node &node)
     node.subtree_size = node.size = std::stoi(std::string(buf, p - buf));
 	buf = p + 1;
 
+    p = strchr(buf, comma);
+    if (p == nullptr) return PARSE_FAIL;
+    auto edge = std::string(buf, p - buf);
+    if (edge == "(null)") {
+        edge.erase();
+    }
+    buf = p + 1;
+
+    node.parents.insert(ParentNode(plabel, edge));
+
     node.name = buf;
+    if (node.name == "(null)") {
+        node.name = node.label;
+    }
 
 	return PARSE_OK;
 }
@@ -218,8 +260,10 @@ bool MemoryDump::import(const std::string &path)
             }
             auto iter = nodes.find(node.label);
 			if (iter != nodes.end()) {
-				std::cout << "Duplicate nodes: " << node.label << std::endl;
-                iter->second.parent_labels.insert(*node.parent_labels.begin());
+				//std::cout << "Duplicate nodes: " << node.label << std::endl;
+                for (const auto & p : node.parents) {
+                    iter->second.parents.insert(p);
+                }
 			} else {
 				nodes[node.label] = node;
 			}
@@ -232,15 +276,17 @@ bool MemoryDump::import(const std::string &path)
 	for(auto &&pair : nodes) {
 		auto &node = pair.second;
 		bool top_level = true;
-		for(const auto & parent_label : node.parent_labels) {
-			auto parent = nodes.find(parent_label);
+		for(const auto & p : node.parents) {
+			auto parent = nodes.find(p.label);
 			if (parent != nodes.end()) {
 				top_level = false;
-				parent->second.children.push_back(&node);
+                ChildNode c = { &node, p.edge };
+				parent->second.children.push_back(c);
 			}
 		}
 		if (top_level) {
-            top_nodes.push_back(&node);
+            ChildNode c = { &pair.second, "" };
+            top_nodes.push_back(c);
 		}
 	}
 
@@ -254,9 +300,9 @@ Node *MemoryDump::find_node(std::vector<std::string> path) const
     for (const auto & name : path) {
         bool found = false;
         for (const auto & node : *v) {
-            if (node->name == name) {
+            if (node.node->name == name) {
                 found = true;
-                ret = node;
+                ret = node.node;
                 break;
             }
         }
@@ -272,7 +318,7 @@ double MemoryDump::update_subtree_size(Node &node, int level = 0)
     if (node.visited) return 0;
     node.visited = true;
 	for(auto c : node.children) {
-		node.subtree_size += update_subtree_size(*c, level + 1) / c->parent_labels.size();
+		node.subtree_size += update_subtree_size(*c.node, level + 1);
 	}
 	return node.subtree_size;
 }
@@ -281,7 +327,7 @@ double MemoryDump::update_subtree_size()
 {
 	total_size = 0;
 	for(auto node : top_nodes) {
-		total_size += update_subtree_size(*node);
+		total_size += update_subtree_size(*node.node);
 	}
     clear_visited();
 
@@ -295,31 +341,31 @@ void MemoryDump::clear_visited(Node &node)
     if (!node.visited) return;
     node.visited = false;
     for (auto c : node.children) {
-        clear_visited(*c);
+        clear_visited(*c.node);
     }
 }
 
 void MemoryDump::clear_visited()
 {
     for (const auto &node : top_nodes) {
-        clear_visited(*node);
+        clear_visited(*node.node);
     }
 }
 
-void MemoryDump::set_critical(const std::vector<Node*> &nodes)
+void MemoryDump::set_critical(const std::vector<ChildNode> &nodes)
 {
     double m = -1;
     for (auto node : nodes) {
-        if (node->subtree_size > m) {
-            m = node->subtree_size;
+        if (node.node->subtree_size > m) {
+            m = node.node->subtree_size;
         }
     }
     for (auto node : nodes) {
-        if (node->subtree_size >= 0.5 * m) {
-            if (node->visited) continue;
-            node->visited = true;
-            node->critical = true;
-            set_critical(node->children);
+        if (node.node->subtree_size >= 0.5 * m) {
+            if (node.node->visited) continue;
+            node.node->visited = true;
+            node.node->critical = true;
+            set_critical(node.node->children);
         }
     }
 }
@@ -330,10 +376,14 @@ bool MemoryDump::draw_tree(Node &node, std::ofstream &ofile, bool critical_only 
     node.visited = true;
     if (critical_only && !node.critical) return true;
 	for(const auto c : node.children) {
-		if (c->subtree_size >= min_size
-            && (!critical_only || c->critical)) {
-			ofile << node.label << " -> " << c->label << std::endl;
-			draw_tree(*c, ofile, critical_only, level + 1);
+		if (c.node->subtree_size >= min_size
+            && (!critical_only || c.node->critical)) {
+            ofile << node.label << " -> " << c.node->label;
+            if (!c.edge.empty()) {
+                ofile << "[label = \"" << c.edge << "\"]";
+            }
+            ofile << ";\n";
+			draw_tree(*c.node, ofile, critical_only, level + 1);
 		}
 	}
     return true;
@@ -362,7 +412,7 @@ void MemoryDump::declare_nodes(Node &node, std::ofstream &ofile, const cmd_opt &
     node.visited = true;
     write_node(node, ofile, opt);
     for (auto c : node.children) {
-        declare_nodes(*c, ofile, opt);
+        declare_nodes(*c.node, ofile, opt);
     }
 }
 
@@ -372,27 +422,39 @@ bool MemoryDump::write_output(const cmd_opt &opt)
         std::ofstream ofile(opt.ofile);
         min_size = total_size * opt.threshold;
         ofile << std::string("strict digraph dump {\n");
-        if (opt.node.empty()) {
+        if (opt.nodes.empty()) {
             for (const auto &pair : nodes) {
                 write_node(pair.second, ofile, opt);
             }
             for (const auto &node : top_nodes) {
-                draw_tree(*node, ofile, opt.critical_only);
+                draw_tree(*node.node, ofile, opt.critical_only);
             }
             clear_visited();
         }
         else {
             /* find the node pointed by opt.node */
-            auto node = find_node(opt.node);
-            if (node == nullptr) {
-                std::cout << "No node found for path " << opt.node_literal << std::endl;
-                return false;
+            std::vector<Node*> nodes;
+            for (const auto &path : opt.nodes) {
+                auto node = find_node(path.node);
+                if (node == nullptr) {
+                    std::cout << "No node found for path " << path.literal << std::endl;
+                    continue;
+                }
+                nodes.push_back(node);
             }
-            declare_nodes(*node, ofile, opt);
-            clear_visited(*node);
+            for (auto & node : nodes) {
+                declare_nodes(*node, ofile, opt);
+            }
+            for (auto & node : nodes) {
+                clear_visited(*node);
+            }
 
-            draw_tree(*node, ofile, opt.critical_only);
-            clear_visited(*node);
+            for (auto & node : nodes) {
+                draw_tree(*node, ofile, opt.critical_only);
+            }
+            for (auto & node : nodes) {
+                clear_visited(*node);
+            }
         }
 		ofile << std::string("}") << std::endl;
 
