@@ -155,16 +155,18 @@ struct MemoryDump {
 		bool write_output(const cmd_opt &opt);
 };
 
-bool MemoryDump::parse(const char *buf, Node &node)
+enum MemoryDump::Parse_Result MemoryDump::parse(const char *buf, Node &node)
 {
 	const char comma = ',';
+    while (*buf == ' ' || *buf == '\t') buf++;
+    if (*buf == '#') return PARSE_COMMENT; //ignore any line beginning with '#'
 	const char *p = strchr(buf, comma);
-	if (p == nullptr) return false;
+	if (p == nullptr) return PARSE_FAIL;
 	node.label = std::string("N") + std::string(buf + 2, p - buf - 2); /* skip '0x' */
 	buf = p + 1;
 
 	p = strchr(buf, comma);
-	if (p == nullptr) return false;
+	if (p == nullptr) return PARSE_FAIL;
     auto plabel = std::string(buf, p - buf);
     if (plabel != "(nil)") {
         plabel = std::string("N") + plabel.substr(2);
@@ -176,18 +178,18 @@ bool MemoryDump::parse(const char *buf, Node &node)
 	buf = p + 1;
 
 	p = strchr(buf, comma);
-	if (p == nullptr) return false;
+	if (p == nullptr) return PARSE_FAIL;
     node.node_type = static_cast<enum Reb_Kind>(std::stoi(std::string(buf, p - buf)));
 	buf = p + 1;
 
 	p = strchr(buf, comma);
-	if (p == nullptr) return false;
+	if (p == nullptr) return PARSE_FAIL;
     node.subtree_size = node.size = std::stoi(std::string(buf, p - buf));
 	buf = p + 1;
 
     node.name = buf;
 
-	return true;
+	return PARSE_OK;
 }
 
 bool MemoryDump::import(const std::string &path)
@@ -198,16 +200,22 @@ bool MemoryDump::import(const std::string &path)
 
 	try {
 		std::ifstream fi(path);
+        size_t i = 0;
 		while(fi.good()) {
 			size_t s = 1024;
 			char *buf = new char[s];
 			fi.getline(buf, s);
 
+            ++i;
 			Node node;
-			if (!parse(buf, node)) {
-				std::cout << "Failed to parse line: " << buf << std::endl;
+            auto parse_result = parse(buf, node);
+			if (parse_result == PARSE_FAIL) {
+				std::cout << "Failed to parse line " << i << ": " << buf << std::endl;
 				continue;
 			}
+            else if (parse_result == PARSE_COMMENT) {
+                continue;
+            }
             auto iter = nodes.find(node.label);
 			if (iter != nodes.end()) {
 				std::cout << "Duplicate nodes: " << node.label << std::endl;
