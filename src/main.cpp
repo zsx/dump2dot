@@ -13,13 +13,16 @@ class cmd_opt {
 		enum CMD_MODE {
 			CMD_OPT,
 			CMD_OUTPUT_ARG,
-			CMD_THRESHOLD_ARG
+			CMD_THRESHOLD_ARG,
+            CMD_NODE_ARG
 		};
 	public:
 		std::string ifile;
 		std::string ofile;
 		double threshold;
         bool critical_only;
+        std::vector<std::string> node;
+        std::string node_literal; /* for error report */
 
         cmd_opt() : threshold(0), critical_only(false) {}
 		std::string help(const char* app);
@@ -29,10 +32,11 @@ class cmd_opt {
 std::string cmd_opt::help(const char* app)
 {
 	std::stringstream ss;
-	ss << "Usage:" << std::endl
-		<< app << " [options] input" << std::endl
-		<< "-o, --output\tfile\tOutput file" << std::endl
-		<< "-t, --threshold\tnumber\tSpecify the minimum percent the node has to have to be shown" << std::endl
+    ss << "Usage:" << std::endl
+        << app << " [options] input" << std::endl
+        << "-o, --output\tfile\tOutput file" << std::endl
+        << "-t, --threshold\tnumber\tSpecify the minimum percent the node has to have to be shown" << std::endl
+        << "-n, --node\tpath-to-node\tOutput only the subtree of the node (path needs to be ';' separated)" << std::endl
         << "-c, --critical\t\t\tOutput critical path only" << std::endl;
 
 	return ss.str();
@@ -49,6 +53,9 @@ int cmd_opt::parse(int argc, char **argv)
 					mode = CMD_OUTPUT_ARG;
 				} else if (arg == "-t" || arg == "--threshold") {
 					mode = CMD_THRESHOLD_ARG;
+                }
+                else if (arg == "-n" || arg == "--node") {
+                    mode = CMD_NODE_ARG;
                 }
                 else if (arg == "-c" || arg == "--critical") {
                     critical_only = true;
@@ -74,6 +81,22 @@ int cmd_opt::parse(int argc, char **argv)
             }
                 mode = CMD_OPT;
 				break;
+            case CMD_NODE_ARG:
+            {
+                const char *buf = argv[i];
+                node_literal = buf;
+                while (true) {
+                    const char *p = strchr(buf, ';');
+                    if (p == nullptr) break;
+                    node.push_back(std::string(buf, p - buf));
+                    buf = p + 1;
+                }
+                if (*buf != '\0') {
+                    node.push_back(std::string(buf));
+                }
+            }
+                mode = CMD_OPT;
+                break;
 			default:
 				return -1;
 		}
@@ -104,11 +127,19 @@ struct Node {
 
 struct MemoryDump {
 	private:
-		bool parse(const char *buf, Node &node);
+        enum Parse_Result {
+            PARSE_OK,
+            PARSE_FAIL,
+            PARSE_COMMENT
+        };
+		enum Parse_Result parse(const char *buf, Node &node);
 		bool draw_tree(Node &node, std::ofstream &ofile, bool set_critical, int level);
         void clear_visited(Node &);
         void clear_visited();
         void set_critical(const std::vector<Node*> &nodes);
+        Node *find_node(std::vector<std::string> path) const;
+        void write_node(const Node &, std::ofstream&, const cmd_opt &);
+        void declare_nodes(Node &node, std::ofstream &ofile, const cmd_opt &opt);
 		double total_size;
 		double min_size;
 	public:
@@ -208,6 +239,26 @@ bool MemoryDump::import(const std::string &path)
 	return true;
 }
 
+Node *MemoryDump::find_node(std::vector<std::string> path) const
+{
+    auto *v = &top_nodes;
+    Node *ret;
+    for (const auto & name : path) {
+        bool found = false;
+        for (const auto & node : *v) {
+            if (node->name == name) {
+                found = true;
+                ret = node;
+                break;
+            }
+        }
+        if (!found) return nullptr;
+        v = &ret->children;
+    }
+
+    return ret;
+}
+
 double MemoryDump::update_subtree_size(Node &node, int level = 0)
 {
     if (node.visited) return 0;
@@ -280,33 +331,63 @@ bool MemoryDump::draw_tree(Node &node, std::ofstream &ofile, bool critical_only 
     return true;
 }
 
+void MemoryDump::write_node(const Node &node, std::ofstream &ofile, const cmd_opt &opt)
+{
+    if (node.subtree_size < min_size) return;
+    if (opt.critical_only && !node.critical) return;
+    ofile << node.label << "[label=\"" << node.name
+        << "\\n" << kind2str[node.node_type]
+        << "\\n" << static_cast<size_t>(node.subtree_size) << "(" << static_cast<size_t>(node.size) << ")"
+        << "\\n" << std::fixed << std::setprecision(2) << (node.subtree_size * 100 / total_size) << "%"
+        << "(" << (node.size * 100 / total_size) << "%"
+        << ")\", "
+        << "shape=box";
+    if (node.critical && !opt.critical_only) {
+        ofile << ", style=filled, fillcolor=yellow";
+    }
+    ofile << "];\n";
+}
+
+void MemoryDump::declare_nodes(Node &node, std::ofstream &ofile, const cmd_opt &opt)
+{
+    if (node.visited) return;
+    node.visited = true;
+    write_node(node, ofile, opt);
+    for (auto c : node.children) {
+        declare_nodes(*c, ofile, opt);
+    }
+}
+
 bool MemoryDump::write_output(const cmd_opt &opt)
 {
-	try {
-		std::ofstream ofile(opt.ofile);
+    try {
+        std::ofstream ofile(opt.ofile);
         min_size = total_size * opt.threshold;
         ofile << std::string("strict digraph dump {\n");
-		for(const auto &pair : nodes) {
-			const auto &node = pair.second;
-            if (node.subtree_size < min_size) continue;
-            if (opt.critical_only && !node.critical) continue;
-            ofile << node.label << "[label=\"" << (node.name == "(null)" ? node.label : node.name)
-                << "\\n" << kind2str[node.node_type]
-                << "\\n" << static_cast<size_t>(node.subtree_size) << "(" << static_cast<size_t>(node.size) << ")"
-                << "\\n" << std::fixed << std::setprecision(2) << (node.subtree_size * 100 / total_size) << "%"
-                << "(" << (node.size * 100 / total_size) << "%"
-                << ")\", "
-                << "shape=box";
-            if (node.critical && !opt.critical_only) {
-                ofile << ", style=filled, fillcolor=yellow";
+        if (opt.node.empty()) {
+            for (const auto &pair : nodes) {
+                write_node(pair.second, ofile, opt);
             }
-            ofile << "];\n";
-		}
-		for(const auto &node : top_nodes) {
-			draw_tree(*node, ofile, opt.critical_only);
-		}
+            for (const auto &node : top_nodes) {
+                draw_tree(*node, ofile, opt.critical_only);
+            }
+            clear_visited();
+        }
+        else {
+            /* find the node pointed by opt.node */
+            auto node = find_node(opt.node);
+            if (node == nullptr) {
+                std::cout << "No node found for path " << opt.node_literal << std::endl;
+                return false;
+            }
+            declare_nodes(*node, ofile, opt);
+            clear_visited(*node);
+
+            draw_tree(*node, ofile, opt.critical_only);
+            clear_visited(*node);
+        }
 		ofile << std::string("}") << std::endl;
-        clear_visited();
+
 	} catch (...) {
 		std::cout << "Unexpected error hanppend while writing output" << std::endl;
 	}
