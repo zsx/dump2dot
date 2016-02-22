@@ -165,9 +165,9 @@ std::unordered_map<enum Reb_Kind, std::string> kind2str = {
     {GOBT_COLOR, "GOBT_COLOR" },
     {GOBT_IMAGE, "GOBT_IMAGE" },
     {GOBT_STRING, "GOBT_STRING" },
-    {GOBT_DRAW, "GOBT_DRAW" },
-    {GOBT_TEXT, "GOBT_TEXT" },
-    {GOBT_EFFECT, "GOBT_EFFECT" }
+    {GOBT_DRAW, "ARRAY(DRAW)" },
+    {GOBT_TEXT, "ARRAY(TEXT)" },
+    {GOBT_EFFECT, "ARRAY(EFFECT)" }
 };
 
 #endif //D2D_KIND_H
