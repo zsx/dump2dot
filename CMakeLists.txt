@@ -8,7 +8,7 @@ include(ExternalProject)
 if (WIN32)
 else ()
 include(FindPkgConfig)
-pkg_search_module(LIBDOT REQUIRED libdot)
+pkg_search_module(LIBDOT REQUIRED libxdot)
 else ()
 endif ()
 
@@ -20,6 +20,8 @@ add_executable(${APP} ${MAIN_SRC})
 target_include_directories(${APP} PUBLIC
 	${LIBDOT_INCLUDE_DIRS}
 )
+
+set_property(TARGET ${APP} PROPERTY CXX_STANDARD 11)
 
 if (WIN32)
 SET(EXTRA_LIBS)

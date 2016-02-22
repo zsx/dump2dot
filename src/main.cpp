@@ -5,6 +5,7 @@
 #include <sstream>
 #include <fstream>
 #include <iomanip>
+#include <cstring>
 
 #include "kind.h"
 
@@ -111,7 +112,7 @@ int cmd_opt::parse(int argc, char **argv)
             NodePath path;
             path.literal = buf;
             while (true) {
-                const char *p = strchr(buf, ';');
+                const char *p = std::strchr(buf, ';');
                 if (p == nullptr) break;
                 path.node.push_back(std::string(buf, p - buf));
                 buf = p + 1;
@@ -209,13 +210,13 @@ enum MemoryDump::Parse_Result MemoryDump::parse(const char *buf, Node &node)
     const char comma = ',';
     while (*buf == ' ' || *buf == '\t') buf++;
     if (*buf == '#' || *buf == '\0') return PARSE_COMMENT; //ignore any line beginning with '#'
-    const char *p = strchr(buf, comma);
+    const char *p = std::strchr(buf, comma);
     if (p == nullptr) return PARSE_FAIL;
     auto skip = buf[1] == 'x' ? 2 : 0;
     node.label = std::string("N") + std::string(buf + skip, p - buf - skip); /* skip '0x' */
     buf = p + 1;
 
-    p = strchr(buf, comma);
+    p = std::strchr(buf, comma);
     if (p == nullptr) return PARSE_FAIL;
     auto plabel = std::string(buf, p - buf);
     if (plabel != "(nil)") {
@@ -227,17 +228,17 @@ enum MemoryDump::Parse_Result MemoryDump::parse(const char *buf, Node &node)
 
     buf = p + 1;
 
-    p = strchr(buf, comma);
+    p = std::strchr(buf, comma);
     if (p == nullptr) return PARSE_FAIL;
     node.node_type = static_cast<enum Reb_Kind>(std::stoi(std::string(buf, p - buf)));
     buf = p + 1;
 
-    p = strchr(buf, comma);
+    p = std::strchr(buf, comma);
     if (p == nullptr) return PARSE_FAIL;
     node.subtree_size = node.size = std::stoi(std::string(buf, p - buf));
     buf = p + 1;
 
-    p = strchr(buf, comma);
+    p = std::strchr(buf, comma);
     if (p == nullptr) return PARSE_FAIL;
     auto edge = std::string(buf, p - buf);
     if (edge == "(null)") {

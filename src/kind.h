@@ -92,7 +92,7 @@
     GOBT_EFFECT,
 };
 
-std::unordered_map<enum Reb_Kind, std::string> kind2str = {
+std::unordered_map<int, std::string> kind2str = {
     {REB_TRASH, "TRASH"},
     {REB_UNSET, "UNSET"},
     {REB_NONE, "NONE"},
