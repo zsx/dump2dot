@@ -1,10 +1,15 @@
-#include "cmd_parse.h"
-#include "dump.h"
-#include "kind.h"
-
 #include <iostream>
 #include <fstream>
 #include <iomanip>
+#include <cstring>
+
+#include "cmd_parse.h"
+#include "dump.h"
+#include "kind.h"
+#include "export.h"
+#include "export_graphml.h"
+#include "export_dot.h"
+#include "export_gml.h"
 
 enum MemoryDump::Parse_Result MemoryDump::parse(const char *buf, Node &node)
 {
@@ -57,8 +62,17 @@ enum MemoryDump::Parse_Result MemoryDump::parse(const char *buf, Node &node)
     return PARSE_OK;
 }
 
+void MemoryDump::reset()
+{
+    total_size = min_size = 0;
+    nodes.clear();
+    top_nodes.clear();
+}
+
 bool MemoryDump::import(const std::string &path)
 {
+    reset();
+
     // Insert a top node
     Node nil("NIL", "NIL");
     nodes[nil.label] = nil;
@@ -101,14 +115,26 @@ bool MemoryDump::import(const std::string &path)
     for (auto &&pair : nodes) {
         auto &node = pair.second;
         bool top_level = true;
+
+        /* find the top edge priority */
+        enum EdgePriority priority = EDGE_PRIORITY_MIN;
         for (const auto & p : node.parents) {
-            auto parent = nodes.find(p.label);
-            if (parent != nodes.end()) {
-                top_level = false;
-                ChildNode c = { &node, p.edge };
-                parent->second.children.push_back(c);
+            if (p.priority > priority) {
+                priority = p.priority;
             }
         }
+
+        for (auto & p : node.parents) {
+            if (p.priority == priority) { // only take the top priority one
+                auto parent = nodes.find(p.label);
+                if (parent != nodes.end()) {
+                    top_level = false;
+                    ChildNode c = { &node, p.edge };
+                    parent->second.children.push_back(c);
+                }
+            }
+        }
+
         if (top_level) {
             ChildNode c = { &pair.second, "" };
             top_nodes.push_back(c);
@@ -138,21 +164,48 @@ Node *MemoryDump::find_node(std::vector<std::string> path) const
     return ret;
 }
 
-double MemoryDump::update_subtree_size(Node &node, int level)
+void MemoryDump::pre_update_subtree_size(Node &node, std::set<std::string> &path)
 {
-    if (node.visited >= 0) return 0;
-    node.visited = level;
+    if (path.find(node.label) != path.end()) return;
+    node.subtree_size_division++;
+    if (node.visited >= 0) return;
+    node.visited = 1;
+    auto pair = path.insert(node.label);
     for (auto c : node.children) {
-        node.subtree_size += update_subtree_size(*c.node, level + 1);
+        pre_update_subtree_size(*c.node, path);
     }
-    return node.subtree_size;
+    if (pair.second) {
+        path.erase(pair.first);
+    }
+}
+
+double MemoryDump::update_subtree_size(Node &node, std::set<std::string> &path)
+{
+    if (path.find(node.label) != path.end()) return 0;
+    if (node.visited >= 0) return node.subtree_size / node.subtree_size_division;
+    node.visited = 1;
+    auto pair = path.insert(node.label);
+    for (auto c : node.children) {
+        node.subtree_size += update_subtree_size(*c.node, path);
+    }
+    if (pair.second) {
+        path.erase(pair.first);
+    }
+    return node.subtree_size / node.subtree_size_division;
 }
 
 double MemoryDump::update_subtree_size()
 {
     total_size = 0;
     for (auto node : top_nodes) {
-        total_size += update_subtree_size(*node.node);
+        std::set<std::string> path;
+        pre_update_subtree_size(*node.node, path);
+        clear_visited(*node.node);
+    }
+
+    for (auto node : top_nodes) {
+        std::set<std::string> path;
+        total_size += update_subtree_size(*node.node, path);
     }
     clear_visited();
 
@@ -187,7 +240,7 @@ void MemoryDump::set_critical(const std::vector<ChildNode> &nodes, int level)
     }
     for (auto node : nodes) {
         if (node.node->subtree_size >= 0.5 * m) {
-            if (node.node->visited) continue;
+            if (node.node->visited >= 0) continue;
             node.node->visited = level;
             node.node->critical = true;
             set_critical(node.node->children, level + 1);
@@ -195,21 +248,25 @@ void MemoryDump::set_critical(const std::vector<ChildNode> &nodes, int level)
     }
 }
 
-bool MemoryDump::draw_tree(Node &node, std::ofstream &ofile, const cmd_opt &opt, int level)
+bool MemoryDump::draw_tree(Node &node, std::ofstream &ofile, const cmd_opt &opt, std::set<std::string> &declared_nodes, int level)
 {
     if (node.visited >= 0 && node.visited <= level) return true;
     if (opt.critical_only && !node.critical) return true;
     if (opt.depth > 0 && level >= opt.depth) return true;
     node.visited = level;
+    if (declared_nodes.find(node.label) == declared_nodes.end()) {
+        write_node(node, ofile, opt);
+        declared_nodes.insert(node.label);
+    }
     for (const auto c : node.children) {
         if (c.node->subtree_size >= min_size
             && (!opt.critical_only || c.node->critical)) {
-            ofile << node.label << " -> " << c.node->label;
-            if (!c.edge.empty()) {
-                ofile << "[label = \"" << c.edge << "\"]";
+            if (declared_nodes.find(c.node->label) == declared_nodes.end()) {
+                write_node(*c.node, ofile, opt);
+                declared_nodes.insert(c.node->label);
             }
-            ofile << ";\n";
-            draw_tree(*c.node, ofile, opt, level + 1);
+            exporter->write_edge(node, *c.node, ofile, c.edge);
+            draw_tree(*c.node, ofile, opt, declared_nodes, level + 1);
         }
     }
     return true;
@@ -217,40 +274,46 @@ bool MemoryDump::draw_tree(Node &node, std::ofstream &ofile, const cmd_opt &opt,
 
 void MemoryDump::write_node(const Node &node, std::ofstream &ofile, const cmd_opt &opt)
 {
-    if (node.subtree_size < min_size) return;
-    if (opt.critical_only && !node.critical) return;
-    ofile << node.label << "[label=\"" << node.name
-        << "\\n" << kind2str[node.node_type]
-        << "\\n" << static_cast<size_t>(node.subtree_size) << "(" << static_cast<size_t>(node.size) << ")"
-        << "\\n" << std::fixed << std::setprecision(2) << (node.subtree_size * 100 / total_size) << "%"
-        << "(" << (node.size * 100 / total_size) << "%"
-        << ")\", "
-        << "shape=box";
-    if (node.critical && !opt.critical_only) {
-        ofile << ", style=filled, fillcolor=yellow";
-    }
-    ofile << "];\n";
-}
-
-void MemoryDump::declare_nodes(Node &node, std::ofstream &ofile, const cmd_opt &opt, int level)
-{
-    if (node.visited >= 0 && node.visited <= level) return;
-    if (opt.depth > 0 && level > opt.depth) return;
-    write_node(node, ofile, opt);
-    node.visited = level;
-    for (auto c : node.children) {
-        declare_nodes(*c.node, ofile, opt, level + 1);
-    }
+    exporter->write_node(node, ofile, opt);
 }
 
 bool MemoryDump::write_output(const cmd_opt &opt)
 {
     try {
-        std::ofstream ofile(opt.ofile);
+        std::ofstream ofile(opt.ofile, std::ofstream::trunc);
         min_size = total_size * opt.threshold;
-        ofile << std::string("strict digraph dump {\n");
+        if (exporter == nullptr
+            || export_type != opt.export_type) {
+            delete exporter;
+            export_type = opt.export_type;
+            switch (export_type) {
+            case EXPORT_DOT:
+                exporter = new ExporterDot(total_size);
+                break;
+            case EXPORT_GML:
+                exporter = new ExporterGML(total_size);
+                break;
+            case EXPORT_GRAPHML:
+                exporter = new ExporterGraphML();
+                break;
+            default:
+                exporter = new ExporterDot(total_size);
+                export_type = EXPORT_DOT;
+            }
+        }
+        else {
+            switch (export_type) {
+            case EXPORT_DOT:
+            case EXPORT_GML:
+                exporter->set_total_size(total_size);
+                break;
+            default:
+                break;
+            }
+        }
+        exporter->write_preamble(ofile);
         std::vector<Node*> selected_nodes;
-        if (opt.nodes.empty()) {
+        if (opt.nodes.empty() && opt.labels.empty()) {
             for (const auto &c : top_nodes) {
                 selected_nodes.push_back(c.node);
             }
@@ -265,23 +328,23 @@ bool MemoryDump::write_output(const cmd_opt &opt)
                 }
                 selected_nodes.push_back(node);
             }
-        }
 
+            for (const auto &label : opt.labels) {
+                auto node = nodes.find(label);
+                if (node != nodes.end()) {
+                    selected_nodes.push_back(&node->second);
+                }
+            }
+        }
+        std::set<std::string> declared_nodes;
         for (auto & node : selected_nodes) {
-            declare_nodes(*node, ofile, opt);
+            draw_tree(*node, ofile, opt, declared_nodes);
         }
         for (auto & node : selected_nodes) {
             clear_visited(*node);
         }
 
-        for (auto & node : selected_nodes) {
-            draw_tree(*node, ofile, opt);
-        }
-        for (auto & node : selected_nodes) {
-            clear_visited(*node);
-        }
-
-        ofile << std::string("}") << std::endl;
+        exporter->write_appendix(ofile);
 
     }
     catch (...) {

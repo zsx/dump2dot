@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <string>
+#include "export.h"
 
 class cmd_opt {
 private:
@@ -11,7 +12,9 @@ private:
         CMD_OUTPUT_ARG,
         CMD_THRESHOLD_ARG,
         CMD_DEPTH_ARG,
-        CMD_NODE_ARG
+        CMD_EXPORT_ARG,
+        CMD_NODE_ARG,
+        CMD_LABEL_ARG
     };
 public:
     struct NodePath {
@@ -23,10 +26,13 @@ public:
     double threshold;
     int depth;
     bool critical_only;
+    enum ExportType export_type;
     std::vector<NodePath> nodes;
+    std::vector<std::string> labels;
 
-    cmd_opt() : threshold(0), critical_only(false), depth(-1) {}
+    cmd_opt() : threshold(0), critical_only(false), depth(-1), export_type(EXPORT_DOT) {}
     std::string help(const char* app);
+    void parse_node(const char *text);
     int parse(int argc, char **argv);
 };
 

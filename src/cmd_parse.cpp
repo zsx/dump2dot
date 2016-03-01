@@ -2,6 +2,12 @@
 
 #include "cmd_parse.h"
 #include <cstring>
+#include <iostream>
+#include <string.h>
+
+#ifdef _MSC_VER
+#define strcasecmp _stricmp
+#endif
 
 std::string cmd_opt::help(const char* app)
 {
@@ -12,10 +18,34 @@ std::string cmd_opt::help(const char* app)
         << "-o, --output\tfile\t\tOutput file" << std::endl
         << "-t, --threshold\tnumber\t\tSpecify the minimum percent the node has to have to be shown" << std::endl
         << "-n, --node\tpath-to-node\tOutput only the subtree of the node (path needs to be ';' separated)" << std::endl
+        << "-l, --label\t\tOutput only the subtres of the node identified by the label" << std::endl
         << "-d, --depth\tintEger\t\tMax depth from the starting node" << std::endl
+        << "-e, --export\t[DOT|GML|GRAPHML]\tThe output file format" << std::endl
         << "-c, --critical\t\t\tOutput critical path only" << std::endl;
 
     return ss.str();
+}
+
+void cmd_opt::parse_node(const char *text)
+{
+    NodePath path;
+    path.literal = text;
+    std::cout << "path: '" << text << "'" << std::endl;
+    bool valid = false;
+    while (true) {
+        const char *p = std::strchr(text, ';');
+        if (p == nullptr) break;
+        path.node.push_back(std::string(text, p - text));
+        valid = true;
+        text = p + 1;
+    }
+    if (*text != '\0') {
+        path.node.push_back(std::string(text));
+        valid = true;
+    }
+    if (valid) {
+        nodes.push_back(path);
+    }
 }
 
 int cmd_opt::parse(int argc, char **argv)
@@ -37,8 +67,14 @@ int cmd_opt::parse(int argc, char **argv)
             else if (arg == "-n" || arg == "--node") {
                 mode = CMD_NODE_ARG;
             }
+            else if (arg == "-l" || arg == "--l") {
+                mode = CMD_LABEL_ARG;
+            }
             else if (arg == "-d" || arg == "--depth") {
                 mode = CMD_DEPTH_ARG;
+            }
+            else if (arg == "-e" || arg == "--export") {
+                mode = CMD_EXPORT_ARG;
             }
             else if (arg == "-c" || arg == "--critical") {
                 critical_only = true;
@@ -74,24 +110,29 @@ int cmd_opt::parse(int argc, char **argv)
             }
             mode = CMD_OPT;
             break;
+        case CMD_EXPORT_ARG:
+            if (!strcasecmp("DOT", argv[i])) {
+                export_type = EXPORT_DOT;
+            }
+            else if (!strcasecmp("GML", argv[i])) {
+                export_type = EXPORT_GML;
+            }
+            else if (!strcasecmp("GRAPHML", argv[i])) {
+                export_type = EXPORT_GRAPHML;
+            }
+            else {
+                return -4;
+            }
+            mode = CMD_OPT;
+            break;
         case CMD_NODE_ARG:
-        {
-            const char *buf = argv[i];
-            NodePath path;
-            path.literal = buf;
-            while (true) {
-                const char *p = std::strchr(buf, ';');
-                if (p == nullptr) break;
-                path.node.push_back(std::string(buf, p - buf));
-                buf = p + 1;
-            }
-            if (*buf != '\0') {
-                path.node.push_back(std::string(buf));
-            }
-            nodes.push_back(path);
-        }
-        mode = CMD_OPT;
-        break;
+            parse_node(argv[i]);
+            mode = CMD_OPT;
+            break;
+        case CMD_LABEL_ARG:
+            labels.push_back(argv[i]);
+            mode = CMD_OPT;
+            break;
         default:
             return -1;
         }
