@@ -28,7 +28,7 @@ public:
     bool critical_only;
     enum ExportType export_type;
     std::vector<NodePath> nodes;
-    std::vector<std::string> labels;
+    std::vector<uintptr_t> labels;
 
     cmd_opt() : threshold(0), critical_only(false), depth(-1), export_type(EXPORT_DOT) {}
     std::string help(const char* app);

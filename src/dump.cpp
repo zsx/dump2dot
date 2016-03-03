@@ -1,6 +1,7 @@
 #include <iostream>
 #include <fstream>
 #include <iomanip>
+#include <string>
 #include <cstring>
 
 #include "cmd_parse.h"
@@ -11,6 +12,9 @@
 #include "export_dot.h"
 #include "export_gml.h"
 
+std::vector<std::string> StringBin::array;
+std::unordered_map<std::string, std::pair<int, int>> StringBin::set;
+
 enum MemoryDump::Parse_Result MemoryDump::parse(const char *buf, Node &node)
 {
     const char comma = ',';
@@ -19,17 +23,20 @@ enum MemoryDump::Parse_Result MemoryDump::parse(const char *buf, Node &node)
     const char *p = std::strchr(buf, comma);
     if (p == nullptr) return PARSE_FAIL;
     auto skip = buf[1] == 'x' ? 2 : 0;
-    node.label = std::string("N") + std::string(buf + skip, p - buf - skip); /* skip '0x' */
+    auto s = std::string(buf + skip, p - buf - skip);
+    size_t pos = 0;
+    node.label = std::stoll(s, &pos, 16); /* skip '0x' */
     buf = p + 1;
 
     p = std::strchr(buf, comma);
     if (p == nullptr) return PARSE_FAIL;
-    auto plabel = std::string(buf, p - buf);
-    if (plabel != "(nil)") {
-        plabel = std::string("N") + plabel.substr(plabel[1] == 'x' ? 2 : 0);
+    s = std::string(buf, p - buf);
+    uintptr_t plabel;
+    if (s != "(nil)") {
+        plabel = std::stoll(s.substr(s[1] == 'x' ? 2 : 0), &pos, 16); /* skip '0x' */
     }
     else {
-        plabel = "NIL";
+        plabel = 0;
     }
 
     buf = p + 1;
@@ -54,9 +61,11 @@ enum MemoryDump::Parse_Result MemoryDump::parse(const char *buf, Node &node)
 
     node.parents.insert(ParentNode(plabel, edge));
 
-    node.name = buf;
-    if (node.name == "(null)") {
-        node.name = node.label;
+    if (!std::strcmp("(null)", buf)) {
+        node.name.erase();
+    }
+    else {
+        node.name.str(buf);
     }
 
     return PARSE_OK;
@@ -74,15 +83,17 @@ bool MemoryDump::import(const std::string &path)
     reset();
 
     // Insert a top node
-    Node nil("NIL", "NIL");
+    Node nil(0, "NIL");
     nodes[nil.label] = nil;
+
+    std::cout << "sizeof(node): " << sizeof(Node) << std::endl;
 
     try {
         std::ifstream fi(path);
         size_t i = 0;
+        size_t s = 1024;
+        char *buf = new char[s];
         while (fi.good()) {
-            size_t s = 1024;
-            char *buf = new char[s];
             fi.getline(buf, s);
 
             ++i;
@@ -105,7 +116,34 @@ bool MemoryDump::import(const std::string &path)
             else {
                 nodes[node.label] = node;
             }
+            if (i > 1000000) {
+                if (i % 1000000 == 0) {
+                    std::cout << "Imported " << i << " lines" << std::endl;
+                }
+            }
+            else if (i > 100000) {
+                if (i % 100000 == 0) {
+                    std::cout << "Imported " << i << " lines" << std::endl;
+                }
+            }
+            else if (i > 10000) {
+                if (i % 10000 == 0) {
+                    std::cout << "Imported " << i << " lines" << std::endl;
+                }
+            }
+            else if (i > 1000) {
+                if (i % 1000 == 0) {
+                    std::cout << "Imported " << i << " lines" << std::endl;
+                }
+            }
+            else {
+                if (i % 100 == 0) {
+                    std::cout << "Imported " << i << " lines" << std::endl;
+                }
+            }
         }
+        delete buf;
+        std::cout << i << " nodes imported\n";
     }
     catch (...) {
         std::cout << "input error" << std::endl;
@@ -151,7 +189,7 @@ Node *MemoryDump::find_node(std::vector<std::string> path) const
     for (const auto & name : path) {
         bool found = false;
         for (const auto & node : *v) {
-            if (node.node->name == name) {
+            if (node.node->name.str() == name) {
                 found = true;
                 ret = node.node;
                 break;
@@ -164,7 +202,7 @@ Node *MemoryDump::find_node(std::vector<std::string> path) const
     return ret;
 }
 
-void MemoryDump::pre_update_subtree_size(Node &node, std::set<std::string> &path)
+void MemoryDump::pre_update_subtree_size(Node &node, std::set<uintptr_t> &path)
 {
     if (path.find(node.label) != path.end()) return;
     node.subtree_size_division++;
@@ -179,7 +217,7 @@ void MemoryDump::pre_update_subtree_size(Node &node, std::set<std::string> &path
     }
 }
 
-double MemoryDump::update_subtree_size(Node &node, std::set<std::string> &path)
+double MemoryDump::update_subtree_size(Node &node, std::set<uintptr_t> &path)
 {
     if (path.find(node.label) != path.end()) return 0;
     if (node.visited >= 0) return node.subtree_size / node.subtree_size_division;
@@ -198,13 +236,13 @@ double MemoryDump::update_subtree_size()
 {
     total_size = 0;
     for (auto node : top_nodes) {
-        std::set<std::string> path;
+        std::set<uintptr_t> path;
         pre_update_subtree_size(*node.node, path);
         clear_visited(*node.node);
     }
 
     for (auto node : top_nodes) {
-        std::set<std::string> path;
+        std::set<uintptr_t> path;
         total_size += update_subtree_size(*node.node, path);
     }
     clear_visited();
@@ -248,7 +286,7 @@ void MemoryDump::set_critical(const std::vector<ChildNode> &nodes, int level)
     }
 }
 
-bool MemoryDump::draw_tree(Node &node, std::ofstream &ofile, const cmd_opt &opt, std::set<std::string> &declared_nodes, int level)
+bool MemoryDump::draw_tree(Node &node, std::ofstream &ofile, const cmd_opt &opt, std::set<uintptr_t> &declared_nodes, int level)
 {
     if (node.visited >= 0 && node.visited <= level) return true;
     if (opt.critical_only && !node.critical) return true;
@@ -265,7 +303,7 @@ bool MemoryDump::draw_tree(Node &node, std::ofstream &ofile, const cmd_opt &opt,
                 write_node(*c.node, ofile, opt);
                 declared_nodes.insert(c.node->label);
             }
-            exporter->write_edge(node, *c.node, ofile, c.edge);
+            exporter->write_edge(node, *c.node, ofile, c.edge.str());
             draw_tree(*c.node, ofile, opt, declared_nodes, level + 1);
         }
     }
@@ -332,11 +370,15 @@ bool MemoryDump::write_output(const cmd_opt &opt)
             for (const auto &label : opt.labels) {
                 auto node = nodes.find(label);
                 if (node != nodes.end()) {
+                    std::cout << "Found node by label " << std::hex << label << std::dec << std::endl;
                     selected_nodes.push_back(&node->second);
+                }
+                else {
+                    std::cout << "Label " << std::hex << label << std::dec << " was not found\n";
                 }
             }
         }
-        std::set<std::string> declared_nodes;
+        std::set<uintptr_t> declared_nodes;
         for (auto & node : selected_nodes) {
             draw_tree(*node, ofile, opt, declared_nodes);
         }

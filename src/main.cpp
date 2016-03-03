@@ -27,6 +27,8 @@ int main(int argc, char **argv)
         opt.ofile = "a.dot";
     }
 
+    std::cout.imbue(std::locale(""));
+
     try {
         MemoryDump dump;
         if (!dump.import(opt.ifile)) {

@@ -76,7 +76,16 @@ extern "C" {
             char* text = gtk_text_buffer_get_slice(buf, &start, &end, FALSE);
             std::cout << "label: '" << text << "'" << std::endl;
             if (text != nullptr && *text != '\0') {
-                app->opt.labels.push_back(text);
+                bool dec = true;
+                if (text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) dec = false;
+                long long i;
+                if (dec) {
+                    i = std::stoll(text, NULL, 10);
+                }
+                else {
+                    i = std::stoll(&text[2], NULL, 16);
+                }
+                app->opt.labels.push_back(i);
             }
             g_free(text);
         }
@@ -170,6 +179,8 @@ int main (int argc, char **argv)
         app.opt.help(argv[0]);
         return EXIT_FAILURE;
     }
+
+    std::cout.imbue(std::locale(""));
 
     app.imported = false;
 

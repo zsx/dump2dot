@@ -130,7 +130,11 @@ int cmd_opt::parse(int argc, char **argv)
             mode = CMD_OPT;
             break;
         case CMD_LABEL_ARG:
-            labels.push_back(argv[i]);
+        {
+            std::string s((argv[i][1] == 'x' || argv[i][1] == 'X')? &argv[i][2] : argv[i]);
+            auto i = std::stoll(s, NULL, 16);
+            labels.push_back(i);
+        }
             mode = CMD_OPT;
             break;
         default:
