@@ -92,7 +92,7 @@ bool MemoryDump::import(const std::string &path)
         std::ifstream fi(path);
         size_t i = 0;
         size_t s = 1024;
-        char *buf = new char[s];
+        auto buf = new char[s];
         while (fi.good()) {
             fi.getline(buf, s);
 
@@ -142,7 +142,7 @@ bool MemoryDump::import(const std::string &path)
                 }
             }
         }
-        delete buf;
+        delete [] buf;
         std::cout << i << " nodes imported\n";
     }
     catch (...) {
