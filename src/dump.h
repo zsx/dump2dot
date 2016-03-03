@@ -110,16 +110,16 @@ struct ChildNode {
 };
 
 struct Node {
-    uintptr_t label;
     std::set<ParentNode, ParentNodeComp> parents;
-    enum Reb_Kind node_type;
-    size_t size;
+    std::vector<ChildNode> children;
+    uintptr_t label;
     double subtree_size;
     StringBin name;
-    std::vector<ChildNode> children;
-    int visited;
+    uint32_t size;
+    enum Reb_Kind node_type;
+    short subtree_size_division; /* how much the subtree_size contributes its parents' subtree_size */
+    short visited;
     bool critical;
-    int subtree_size_division; /* how much the subtree_size contributes its parents' subtree_size */
 
     Node(uintptr_t label_ = 0, const std::string &name_ = "") :
         label(label_), name(name_),
