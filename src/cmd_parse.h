@@ -12,6 +12,7 @@ private:
         CMD_OUTPUT_ARG,
         CMD_THRESHOLD_ARG,
         CMD_DEPTH_ARG,
+        CMD_MAX_SUBNODES_ARG,
         CMD_EXPORT_ARG,
         CMD_NODE_ARG,
         CMD_LABEL_ARG
@@ -25,12 +26,13 @@ public:
     std::string ofile;
     double threshold;
     int depth;
+    int max_subnodes;
     bool critical_only;
     enum ExportType export_type;
     std::vector<NodePath> nodes;
     std::vector<uintptr_t> labels;
 
-    cmd_opt() : threshold(0), critical_only(false), depth(-1), export_type(EXPORT_DOT) {}
+    cmd_opt() : threshold(0), critical_only(false), depth(-1), max_subnodes(-1), export_type(EXPORT_DOT) {}
     std::string help(const char* app);
     void parse_node(const char *text);
     int parse(int argc, char **argv);

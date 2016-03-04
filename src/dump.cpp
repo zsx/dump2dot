@@ -3,6 +3,7 @@
 #include <iomanip>
 #include <string>
 #include <cstring>
+#include <algorithm>
 
 #include "cmd_parse.h"
 #include "dump.h"
@@ -292,21 +293,39 @@ bool MemoryDump::draw_tree(Node &node, std::ofstream &ofile, const cmd_opt &opt,
     if (opt.critical_only && !node.critical) return true;
     if (opt.depth > 0 && level >= opt.depth) return true;
     node.visited = level;
-    if (declared_nodes.find(node.label) == declared_nodes.end()) {
-        write_node(node, ofile, opt);
-        declared_nodes.insert(node.label);
-    }
-    for (const auto c : node.children) {
+
+    std::vector<ChildNode*> edges;
+    for (auto &&c : node.children) {
         if (c.node->subtree_size >= min_size
             && (!opt.critical_only || c.node->critical)) {
-            if (declared_nodes.find(c.node->label) == declared_nodes.end()) {
-                write_node(*c.node, ofile, opt);
-                declared_nodes.insert(c.node->label);
-            }
-            exporter->write_edge(node, *c.node, ofile, c.edge.str());
-            draw_tree(*c.node, ofile, opt, declared_nodes, level + 1);
+            edges.push_back(&c);
         }
     }
+
+    if (opt.max_subnodes > 0 && edges.size() > opt.max_subnodes) { //too many nodes, only write nodes with big sizes;
+        std::sort(edges.begin(), edges.end(),
+            [](const ChildNode *a, const ChildNode *b) {
+            return a->node->subtree_size > b->node->subtree_size;
+            }
+        );
+        edges.resize(opt.max_subnodes);
+    }
+
+    bool tail_written = false;
+    for (const auto & c : edges) {
+        if (!tail_written && declared_nodes.find(node.label) == declared_nodes.end()) {
+            write_node(node, ofile, opt);
+            declared_nodes.insert(node.label);
+            tail_written = true;
+        }
+        if (declared_nodes.find(c->node->label) == declared_nodes.end()) {
+            write_node(*c->node, ofile, opt);
+            declared_nodes.insert(c->node->label);
+        }
+        exporter->write_edge(node, *c->node, ofile, c->edge.str());
+        draw_tree(*c->node, ofile, opt, declared_nodes, level + 1);
+    }
+
     return true;
 }
 

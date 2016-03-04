@@ -16,6 +16,7 @@ struct App {
     GtkWidget *depth_button;
     GtkWidget *node_entry;
     GtkWidget *label_entry;
+    GtkWidget *max_subnodes_button;
 } app;
 
 extern "C" {
@@ -48,6 +49,7 @@ extern "C" {
         }
         app->opt.threshold = threshold;
         app->opt.depth = static_cast<int>(gtk_spin_button_get_value(GTK_SPIN_BUTTON(app->depth_button)));
+        app->opt.max_subnodes = static_cast<int>(gtk_spin_button_get_value(GTK_SPIN_BUTTON(app->max_subnodes_button)));
 
         app->opt.nodes.clear();
         auto buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(app->node_entry));
@@ -193,12 +195,14 @@ int main (int argc, char **argv)
     app.input_file_button = GTK_WIDGET(gtk_builder_get_object(builder, "input_file_button"));
     app.output_file_button = GTK_WIDGET(gtk_builder_get_object(builder, "output_file_button"));
     app.depth_button = GTK_WIDGET(gtk_builder_get_object(builder, "depth_spin_button"));
+    app.max_subnodes_button = GTK_WIDGET(gtk_builder_get_object(builder, "max_subnodes_spin_button"));
     app.threshold_entry = GTK_WIDGET(gtk_builder_get_object(builder, "threshold_entry"));
     app.node_entry = GTK_WIDGET(gtk_builder_get_object(builder, "node_entry"));
     app.label_entry = GTK_WIDGET(gtk_builder_get_object(builder, "label_entry"));
 
     GtkAdjustment *adj = gtk_adjustment_new(-1, -1, 999999999, 1, 10, 1);
     gtk_spin_button_configure(GTK_SPIN_BUTTON(app.depth_button), adj, 1, 0);
+    gtk_spin_button_configure(GTK_SPIN_BUTTON(app.max_subnodes_button), adj, 1, 0);
 
     //GtkFileChooser *input_chooser = GTK_FILE_CHOOSER(input_chooser_button);
 //    gtk_file_chooser_set_current_folder_file(app.opt.ifile);

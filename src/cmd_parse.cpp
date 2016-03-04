@@ -73,6 +73,9 @@ int cmd_opt::parse(int argc, char **argv)
             else if (arg == "-d" || arg == "--depth") {
                 mode = CMD_DEPTH_ARG;
             }
+            else if (arg == "-m" || arg == "--max-subnodes") {
+                mode = CMD_MAX_SUBNODES_ARG;
+            }
             else if (arg == "-e" || arg == "--export") {
                 mode = CMD_EXPORT_ARG;
             }
@@ -101,6 +104,15 @@ int cmd_opt::parse(int argc, char **argv)
         }
         mode = CMD_OPT;
         break;
+        case CMD_MAX_SUBNODES_ARG:
+            try {
+                max_subnodes = std::stoi(argv[i]);
+            }
+            catch (...) {
+                return -10;
+            }
+            mode = CMD_OPT;
+            break;
         case CMD_DEPTH_ARG:
             try {
                 depth = std::stoi(argv[i]);
