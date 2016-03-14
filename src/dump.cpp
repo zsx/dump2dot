@@ -158,13 +158,21 @@ bool MemoryDump::import(const std::string &path)
         /* find the top edge priority */
         enum EdgePriority priority = EDGE_PRIORITY_MIN;
         for (const auto & p : node.parents) {
-            if (p.priority > priority) {
+            bool skip = false;
+            auto parent = nodes.find(p.label);
+            if (parent != nodes.end()) {
+                auto pname = parent->second.name.str();
+                if (pname == "self" || pname == "???") { // always keep the edges from self and ??? to its context
+                    skip = true;
+                }
+            }
+            if (p.priority > priority && !skip) {
                 priority = p.priority;
             }
         }
 
         for (auto & p : node.parents) {
-            if (p.priority == priority) { // only take the top priority one
+            if (p.priority >= priority) { // only take the top priority one
                 auto parent = nodes.find(p.label);
                 if (parent != nodes.end()) {
                     top_level = false;
