@@ -34,8 +34,8 @@ std::string cmd_opt::help(const char* app)
         << "-o, --output\tfile\t\tOutput file" << std::endl
         << "-t, --threshold\tnumber\t\tSpecify the minimum percent the node has to have to be shown" << std::endl
         << "-n, --node\tpath-to-node\tOutput only the subtree of the node (path needs to be ';' separated)" << std::endl
-        << "-l, --label\t\tOutput only the subtres of the node identified by the label" << std::endl
-        << "-d, --depth\tintEger\t\tMax depth from the starting node" << std::endl
+        << "-l, --label\t\tOutput only the subtree of the node identified by the label" << std::endl
+        << "-d, --depth\tinteger\t\tMax depth from the starting node" << std::endl
         << "-e, --export\t[DOT|GML|GRAPHML]\tThe output file format" << std::endl
         << "-c, --critical\t\t\tOutput critical path only" << std::endl;
 
