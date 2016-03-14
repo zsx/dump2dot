@@ -301,13 +301,14 @@ bool MemoryDump::draw_tree(Node &node, std::ofstream &ofile, const cmd_opt &opt,
             edges.push_back(&c);
         }
     }
+    
+    std::sort(edges.begin(), edges.end(),
+        [](const ChildNode *a, const ChildNode *b) {
+        return a->node->subtree_size > b->node->subtree_size;
+    }
+    );
 
     if (opt.max_subnodes > 0 && edges.size() > opt.max_subnodes) { //too many nodes, only write nodes with big sizes;
-        std::sort(edges.begin(), edges.end(),
-            [](const ChildNode *a, const ChildNode *b) {
-            return a->node->subtree_size > b->node->subtree_size;
-            }
-        );
         edges.resize(opt.max_subnodes);
     }
 
@@ -399,6 +400,8 @@ bool MemoryDump::write_output(const cmd_opt &opt)
         }
         std::set<uintptr_t> declared_nodes;
         for (auto & node : selected_nodes) {
+            write_node(*node, ofile, opt);
+            declared_nodes.insert(node->label);
             draw_tree(*node, ofile, opt, declared_nodes);
         }
         for (auto & node : selected_nodes) {
