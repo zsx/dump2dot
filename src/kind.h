@@ -8,7 +8,7 @@
 **
 */  enum Reb_Kind
 /*
-**      Internal datatype numbers. These change. Do not export.
+**      Please keep in sync with R3
 **
 ***********************************************************************/
 {
