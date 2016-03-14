@@ -202,7 +202,8 @@ int main (int argc, char **argv)
 
     GtkAdjustment *adj = gtk_adjustment_new(-1, -1, 999999999, 1, 10, 1);
     gtk_spin_button_configure(GTK_SPIN_BUTTON(app.depth_button), adj, 1, 0);
-    gtk_spin_button_configure(GTK_SPIN_BUTTON(app.max_subnodes_button), adj, 1, 0);
+    GtkAdjustment *adj2 = gtk_adjustment_new(-1, -1, 999999999, 1, 10, 1);
+    gtk_spin_button_configure(GTK_SPIN_BUTTON(app.max_subnodes_button), adj2, 1, 0);
 
     //GtkFileChooser *input_chooser = GTK_FILE_CHOOSER(input_chooser_button);
 //    gtk_file_chooser_set_current_folder_file(app.opt.ifile);
